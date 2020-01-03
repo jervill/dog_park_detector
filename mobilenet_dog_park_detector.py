@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Script to run generic MobileNet based classification model."""
+import os
 import argparse
 import time
 import json
@@ -125,6 +126,10 @@ def get_cropped_image(camera):
         # Crop picture and return it
         yield image.crop(locations['dog_park'])
 
+def _make_filename(image_folder, timestamp, label):
+    path = '%s/Dog/%s/%s.%s'
+    return os.path.expanduser(path % (image_folder, label, timestamp, 'jpeg'))
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -147,6 +152,10 @@ def main():
         help='Shows end to end FPS.')
     parser.add_argument('--time_interval', type=int, default=10,
         help='Time interval at which to store data in seconds.')
+    parser.add_argument('--gather_data', action='store_true', default=False,
+        help='Also save images according to the assigned category.')
+    parser.add_argument('--image_folder', default='/home/pi/Pictures/Data',
+        help='Folder to save captured images')
     args = parser.parse_args()
 
     model = inference.ModelDescriptor(
@@ -154,7 +163,14 @@ def main():
         input_shape=(1, args.input_height, args.input_width, args.input_depth),
         input_normalizer=(args.input_mean, args.input_std),
         compute_graph=utils.load_compute_graph(args.model_path))
-    labels = read_labels(args.label_path)        
+    labels = read_labels(args.label_path)
+
+    # Check that the folder exists
+    if args.gather_data:
+        expected_subfolders = ['Dog', 'VB1', 'VB2']
+        subfolders = os.listdir(args.image_folder)
+        for folder in expected_subfolders:
+            assert folder in subfolders
 
     with PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30) as camera:
         if args.preview:
@@ -178,6 +194,10 @@ def main():
 
                 timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
                 print(timestamp + '\n')
+
+                if args.gather_data:
+                    filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
+                    cropped_image.save(filename)
 
                 if args.preview:
                     camera.annotate_foreground = Color('black')
