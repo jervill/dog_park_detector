@@ -24,30 +24,33 @@ from picamera import PiCamera, Color
 from aiy.vision import inference
 from aiy.vision.models import utils
 
+# data_over_time = dict()
+
+# def update_data(time, (probabilities)):
+#     data_over_time = dict()
 
 def read_labels(label_path):
     with open(label_path) as label_file:
         return [label.strip() for label in label_file.readlines()]
 
 
-def get_message(result, threshold, top_k):
+def get_message(result):
+    result_as_string = [' %s (%.2f)' % (label, prob) for label, prob in result]
     if result:
-        return 'Detecting:\n %s' % '\n'.join(result)
-
-    return 'Nothing detected when threshold=%.2f, top_k=%d' % (threshold, top_k)
+        return 'Detecting:\n %s' % '\n '.join(result_as_string)
 
 
-def process(result, labels, tensor_name, threshold, top_k):
+def process(result, labels, tensor_name):
     """Processes inference result and returns labels sorted by confidence."""
     # MobileNet based classification model returns one result vector.
     assert len(result.tensors) == 1
     tensor = result.tensors[tensor_name]
     probs, shape = tensor.data, tensor.shape
     assert shape.depth == len(labels)
-    pairs = [pair for pair in enumerate(probs) if pair[1] > threshold]
+    pairs = [pair for pair in enumerate(probs)]
     pairs = sorted(pairs, key=lambda pair: pair[1], reverse=True)
-    pairs = pairs[0:top_k]
-    return [' %s (%.2f)' % (labels[index], prob) for index, prob in pairs]
+    labeled_pairs = [(labels[index], prob) for index, prob in pairs]
+    return labeled_pairs
 
 
 def get_cropped_image(camera):
@@ -74,7 +77,6 @@ def get_cropped_image(camera):
         yield image.crop(locations['dog_park'])
 
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', required=True,
@@ -90,9 +92,6 @@ def main():
     parser.add_argument('--input_mean', type=float, default=128.0, help='Input mean.')
     parser.add_argument('--input_std', type=float, default=128.0, help='Input std.')
     parser.add_argument('--input_depth', type=int, default=3, help='Input depth.')
-    parser.add_argument('--threshold', type=float, default=0.1,
-        help='Threshold for classification score (from output tensor).')
-    parser.add_argument('--top_k', type=int, default=3, help='Keep at most top_k labels.')
     parser.add_argument('--preview', action='store_true', default=False,
         help='Enables camera preview in addition to printing result to terminal.')
     parser.add_argument('--show_fps', action='store_true', default=False,
@@ -115,9 +114,8 @@ def main():
             for cropped_image in get_cropped_image(camera):
                 # then run image_inference on them.
                 result = image_inference.run(cropped_image)
-                processed_result = process(result, labels, args.output_layer,
-                                           args.threshold, args.top_k)
-                message = get_message(processed_result, args.threshold, args.top_k)
+                processed_result = process(result, labels, args.output_layer)
+                message = get_message(processed_result)
 
                 # Print the message
                 print(message)
