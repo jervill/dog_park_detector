@@ -18,6 +18,8 @@ import os
 import argparse
 import time
 import json
+import random
+
 from io import BytesIO
 from PIL import Image
 
@@ -196,8 +198,13 @@ def main():
                 print(timestamp + '\n')
 
                 if args.gather_data:
-                    filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
-                    cropped_image.save(filename)
+                    # For now only save non-high activity
+                    if(
+                        (processed_result[0][0] == 'no activity') or
+                        (processed_result[0][0] == 'low activity' and random.random() > 0.99)
+                    ):
+                        filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
+                        cropped_image.save(filename)
 
                 if args.preview:
                     camera.annotate_foreground = Color('black')
