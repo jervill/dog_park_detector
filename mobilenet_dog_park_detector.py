@@ -16,6 +16,7 @@
 """Script to run generic MobileNet based classification model."""
 import argparse
 import time
+import json
 from io import BytesIO
 from PIL import Image
 
@@ -24,10 +25,58 @@ from picamera import PiCamera, Color
 from aiy.vision import inference
 from aiy.vision.models import utils
 
-# data_over_time = dict()
+# Make this a csv
+long_term_data_over_time = {
+    'time': [],
+    'dog park': {
+        'high activity': [],
+        'low activity': [],
+        'no activity': [],
+    }
+}
 
-# def update_data(time, (probabilities)):
-#     data_over_time = dict()
+def commit_data_to_long_term(interval, short_term_data={}):
+    def get_average(list):
+        accumulator = 0
+        for value in list:
+            accumulator += value
+        
+        return round(accumulator / len(list),2)
+
+    def reset_data():
+        return {
+            'time': [],
+            'dog park': {
+                'high activity': [],
+                'low activity': [],
+                'no activity': [],
+            }
+        }
+
+    short_term_data = reset_data()
+
+    while True:
+        yield short_term_data
+
+        elapsed_time = short_term_data['time'][-1] - short_term_data['time'][0]
+
+        # If we've hit the time interval, record to long term.
+        if elapsed_time > interval:
+            long_term_data_over_time['time'].append(short_term_data['time'][-1])
+
+            for k, v in short_term_data['dog park'].items():
+                average = get_average(v)
+                long_term_data_over_time['dog park'][k].append(average)
+
+            short_term_data = reset_data()
+            print(json.dumps(long_term_data_over_time))
+
+
+def handle_data(data, result):
+    data['time'].append(int(time.time()))
+
+    for label, prob in result:
+        data['dog park'][label].append(prob)
 
 def read_labels(label_path):
     with open(label_path) as label_file:
@@ -96,6 +145,8 @@ def main():
         help='Enables camera preview in addition to printing result to terminal.')
     parser.add_argument('--show_fps', action='store_true', default=False,
         help='Shows end to end FPS.')
+    parser.add_argument('--time_interval', type=int, default=10,
+        help='Time interval at which to store data in seconds.')
     args = parser.parse_args()
 
     model = inference.ModelDescriptor(
@@ -103,11 +154,14 @@ def main():
         input_shape=(1, args.input_height, args.input_width, args.input_depth),
         input_normalizer=(args.input_mean, args.input_std),
         compute_graph=utils.load_compute_graph(args.model_path))
-    labels = read_labels(args.label_path)
+    labels = read_labels(args.label_path)        
 
     with PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30) as camera:
         if args.preview:
             camera.start_preview()
+
+        data_generator = commit_data_to_long_term(args.time_interval)
+        data = data_generator.send(None)
 
         with inference.ImageInference(model) as image_inference:
             # Constantly get cropped images
@@ -115,6 +169,8 @@ def main():
                 # then run image_inference on them.
                 result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, args.output_layer)
+                handle_data(data, processed_result)
+                data = data_generator.send(data)
                 message = get_message(processed_result)
 
                 # Print the message
