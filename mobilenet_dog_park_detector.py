@@ -15,6 +15,8 @@
 # limitations under the License.
 """Script to run generic MobileNet based classification model."""
 import argparse
+from io import BytesIO
+from PIL import Image
 
 from picamera import PiCamera, Color
 
@@ -45,6 +47,31 @@ def process(result, labels, tensor_name, threshold, top_k):
     pairs = sorted(pairs, key=lambda pair: pair[1], reverse=True)
     pairs = pairs[0:top_k]
     return [' %s (%.2f)' % (labels[index], prob) for index, prob in pairs]
+
+
+def get_cropped_image(camera):
+    # Locations of interesting locations:
+    court_one_dimensions = (0,240,170,400)
+    court_two_dimensions = (188, 240, 408,400)
+    dog_park_dimensions = (559, 228, 820,388)
+
+    locations = {
+        'court_one': court_one_dimensions,
+        'court_two': court_two_dimensions,
+        'dog_park': dog_park_dimensions,
+    }
+
+    stream = BytesIO()
+    while True:
+        # Take picture
+        camera.capture(stream, format='jpeg')
+        # "Rewind" the stream to the beginning so we can read its content
+        stream.seek(0)
+        image = Image.open(stream)
+
+        # Crop picture and return it
+        yield image.crop(locations['dog_park'])
+
 
 
 def main():
@@ -78,18 +105,22 @@ def main():
         compute_graph=utils.load_compute_graph(args.model_path))
     labels = read_labels(args.label_path)
 
-    with PiCamera(sensor_mode=4, resolution=(1640, 1232), framerate=30) as camera:
+    with PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30) as camera:
         if args.preview:
             camera.start_preview()
 
-        with inference.CameraInference(model) as camera_inference:
-            for result in camera_inference.run(args.num_frames):
+        with inference.ImageInference(model) as image_inference:
+            # Constantly get cropped images
+            for cropped_image in get_cropped_image(camera):
+                # then run image_inference on them.
+                result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, args.output_layer,
                                            args.threshold, args.top_k)
                 message = get_message(processed_result, args.threshold, args.top_k)
-                if args.show_fps:
-                    message += '\nWith %.1f FPS.' % camera_inference.rate
+
+                # Print the message
                 print(message)
+                print('NEXT!')
 
                 if args.preview:
                     camera.annotate_foreground = Color('black')
