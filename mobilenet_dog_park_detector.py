@@ -15,6 +15,7 @@
 # limitations under the License.
 """Script to run generic MobileNet based classification model."""
 import argparse
+import time
 from io import BytesIO
 from PIL import Image
 
@@ -61,10 +62,10 @@ def get_cropped_image(camera):
         'dog_park': dog_park_dimensions,
     }
 
-    stream = BytesIO()
     while True:
+        stream = BytesIO()
         # Take picture
-        camera.capture(stream, format='jpeg')
+        camera.capture(stream, format='jpeg', use_video_port=True)
         # "Rewind" the stream to the beginning so we can read its content
         stream.seek(0)
         image = Image.open(stream)
@@ -120,7 +121,9 @@ def main():
 
                 # Print the message
                 print(message)
-                print('NEXT!')
+
+                timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
+                print(timestamp + '\n')
 
                 if args.preview:
                     camera.annotate_foreground = Color('black')
