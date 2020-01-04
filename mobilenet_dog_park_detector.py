@@ -72,7 +72,11 @@ def commit_data_to_long_term(interval, short_term_data={}):
                 long_term_data_over_time['dog park'][k].append(average)
 
             short_term_data = reset_data()
-            print(json.dumps(long_term_data_over_time))
+
+            filename = 'data.json'
+
+            with open(filename, 'w') as file:
+                file.write(json.dumps(long_term_data_over_time))
 
 
 def handle_data(data, result):
