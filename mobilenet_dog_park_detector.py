@@ -198,10 +198,11 @@ def main():
                 print(timestamp + '\n')
 
                 if args.gather_data:
-                    # For now only save non-high activity
+                    # Gather all data on 'no activity' since it's biased against that.
+                    # Gather 1% of all others.
                     if(
                         (processed_result[0][0] == 'no activity') or
-                        (processed_result[0][0] == 'low activity' and random.random() > 0.99)
+                        (random.random() > 0.99)
                     ):
                         filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
                         cropped_image.save(filename)
