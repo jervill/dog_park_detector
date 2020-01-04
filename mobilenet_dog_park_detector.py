@@ -107,9 +107,9 @@ def process(result, labels, tensor_name):
 
 def get_cropped_image(camera):
     # Locations of interesting locations:
-    court_one_dimensions = (0,240,170,400)
-    court_two_dimensions = (188, 240, 408,400)
-    dog_park_dimensions = (559, 228, 820,388)
+    court_one_dimensions = (0, 195, 210, 445)
+    court_two_dimensions = (148, 195, 448, 445)
+    dog_park_dimensions = (520, 183, 820, 433)
 
     locations = {
         'court_one': court_one_dimensions,
