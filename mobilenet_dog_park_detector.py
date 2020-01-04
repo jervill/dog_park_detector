@@ -181,6 +181,10 @@ def main():
         data_generator = commit_data_to_long_term(args.time_interval)
         data = data_generator.send(None)
 
+        # Capture one picture of entire scene each time it's started again.
+        scene_filename = time.strftime('%Y-%m-%d') + '.jpeg'
+        camera.capture(scene_filename)
+
         with inference.ImageInference(model) as image_inference:
             # Constantly get cropped images
             for cropped_image in get_cropped_image(camera):
