@@ -29,7 +29,7 @@ from aiy.vision import inference
 from aiy.vision.models import utils
 
 # Make this a csv
-long_term_data_over_time = {
+DATA_OVER_TIME = {
     'time': [],
     'dog park': {
         'high activity': [],
@@ -65,18 +65,18 @@ def commit_data_to_long_term(interval, short_term_data={}):
 
         # If we've hit the time interval, record to long term.
         if elapsed_time > interval:
-            long_term_data_over_time['time'].append(short_term_data['time'][-1])
+            DATA_OVER_TIME['time'].append(short_term_data['time'][-1])
 
             for k, v in short_term_data['dog park'].items():
                 average = get_average(v)
-                long_term_data_over_time['dog park'][k].append(average)
+                DATA_OVER_TIME['dog park'][k].append(average)
 
             short_term_data = reset_data()
 
             filename = 'data.json'
 
             with open(filename, 'w') as file:
-                file.write(json.dumps(long_term_data_over_time))
+                file.write(json.dumps(DATA_OVER_TIME))
 
 
 def handle_data(data, result):
@@ -84,6 +84,7 @@ def handle_data(data, result):
 
     for label, prob in result:
         data['dog park'][label].append(prob)
+
 
 def read_labels(label_path):
     with open(label_path) as label_file:
@@ -109,7 +110,7 @@ def process(result, labels, tensor_name):
     return labeled_pairs
 
 
-def get_cropped_image(camera):
+def get_cropped_images(camera):
     # Locations of interesting locations:
     court_one_dimensions = (0, 195, 210, 445)
     court_two_dimensions = (148, 195, 448, 445)
@@ -130,13 +131,19 @@ def get_cropped_image(camera):
         image = Image.open(stream)
 
         # Crop picture and return it
-        yield image.crop(locations['dog_park'])
+        dog_park = image.crop(locations['dog_park'])
+        court_one = image.crop(locations['court_one'])
+        court_two = image.crop(locations['court_two'])
+        yield (dog_park, court_one, court_two)
+
 
 def _make_filename(image_folder, timestamp, label):
     path = '%s/Dog/%s/%s.%s'
     return os.path.expanduser(path % (image_folder, label, timestamp, 'jpeg'))
 
 
+# TODO: Hardcode the arguments that never change anyway (like input height, width, layer)
+# TODO: Add argument for each model and layer. Put into List, then run each if possible.
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', required=True,
@@ -186,12 +193,19 @@ def main():
         data = data_generator.send(None)
 
         # Capture one picture of entire scene each time it's started again.
+        time.sleep(2)
         scene_filename = time.strftime('%Y-%m-%d') + '.jpeg'
         camera.capture(scene_filename)
 
+        # TODO: Load the volleyball models too
+        #     with A() as a, B() as b, C() as c:
         with inference.ImageInference(model) as image_inference:
+
+            # TODO: For each inference model, crop and process a different thing.
             # Constantly get cropped images
-            for cropped_image in get_cropped_image(camera):
+            for cropped_images in get_cropped_images(camera):
+                cropped_image = cropped_images[0]
+
                 # then run image_inference on them.
                 result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, args.output_layer)
