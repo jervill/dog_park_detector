@@ -114,7 +114,7 @@ def get_cropped_images(camera):
     # Locations of interesting locations:
     court_one_dimensions = (0, 195, 210, 445)
     court_two_dimensions = (148, 195, 448, 445)
-    dog_park_dimensions = (520, 183, 820, 433)
+    dog_park_dimensions = (520, 183, 820, 410)
 
     locations = {
         'court_one': court_one_dimensions,
@@ -220,11 +220,11 @@ def main():
                 print(timestamp + '\n')
 
                 if args.gather_data:
-                    # Gather all data on 'no activity' since it's biased against that.
-                    # Gather 1% of all others.
+                    # Gather 1% data on 'no activity' since it's biased against that.
+                    # Gather 0.1% of all images.
                     if(
-                        (processed_result[0][0] == 'no activity') or
-                        (random.random() > 0.99)
+                        (processed_result[0][0] == 'no activity' and random.random() > 0.99) or
+                        (random.random() > 0.999)
                     ):
                         filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
                         cropped_image.save(filename)
