@@ -21,7 +21,7 @@ import json
 import random
 
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from picamera import PiCamera, Color
 
@@ -35,6 +35,13 @@ DATA_OVER_TIME = {
         'low activity': [],
         'no activity': [],
     }
+}
+
+# Bounding boxes of interesting locations:
+LOCATIONS = {
+    'court_one': (0, 195, 210, 445),
+    'court_two': (148, 195, 448, 445),
+    'dog_park': (520, 183, 820, 388),
 }
 
 def commit_data_to_long_term(interval, filename, short_term_data={}):
@@ -108,17 +115,6 @@ def process(result, labels, tensor_name):
 
 
 def get_cropped_images(camera):
-    # Locations of interesting locations:
-    court_one_dimensions = (0, 195, 210, 445)
-    court_two_dimensions = (148, 195, 448, 445)
-    dog_park_dimensions = (520, 183, 820, 410)
-
-    locations = {
-        'court_one': court_one_dimensions,
-        'court_two': court_two_dimensions,
-        'dog_park': dog_park_dimensions,
-    }
-
     while True:
         stream = BytesIO()
         # Take picture
@@ -128,9 +124,9 @@ def get_cropped_images(camera):
         image = Image.open(stream)
 
         # Crop picture and return it
-        dog_park = image.crop(locations['dog_park'])
-        court_one = image.crop(locations['court_one'])
-        court_two = image.crop(locations['court_two'])
+        dog_park = image.crop(LOCATIONS['dog_park'])
+        court_one = image.crop(LOCATIONS['court_one'])
+        court_two = image.crop(LOCATIONS['court_two'])
         yield (dog_park, court_one, court_two)
 
 
@@ -197,6 +193,22 @@ def main():
         date = time.strftime('%Y-%m-%d')
         scene_filename = _make_filename(args.image_folder, date, None)
         camera.capture(scene_filename)
+
+        # Draw bounding box on image showing the crop locations
+        with Image.open(scene_filename) as scene:
+            def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
+                assert border % 2 == 1
+                for i in range(-border // 2, border // 2 + 1):
+                    draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), fill=fill, outline=outline)
+
+            draw = ImageDraw.Draw(scene)
+
+            for location in LOCATIONS.values():
+                x1, y1, x2, y2 = location
+                draw_rectangle(draw, x1, y1, x2, y2, 3, outline='white')
+
+            scene.save(scene_filename)
+
 
         # TODO: Load the volleyball models too
         #     with A() as a, B() as b, C() as c:
