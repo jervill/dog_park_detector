@@ -28,7 +28,6 @@ from picamera import PiCamera, Color
 from aiy.vision import inference
 from aiy.vision.models import utils
 
-# Make this a csv
 DATA_OVER_TIME = {
     'time': [],
     'dog park': {
@@ -38,7 +37,7 @@ DATA_OVER_TIME = {
     }
 }
 
-def commit_data_to_long_term(interval, short_term_data={}):
+def commit_data_to_long_term(interval, filename, short_term_data={}):
     def get_average(list):
         accumulator = 0
         for value in list:
@@ -72,8 +71,6 @@ def commit_data_to_long_term(interval, short_term_data={}):
                 DATA_OVER_TIME['dog park'][k].append(average)
 
             short_term_data = reset_data()
-
-            filename = 'data.json'
 
             with open(filename, 'w') as file:
                 file.write(json.dumps(DATA_OVER_TIME))
@@ -137,9 +134,11 @@ def get_cropped_images(camera):
         yield (dog_park, court_one, court_two)
 
 
-def _make_filename(image_folder, timestamp, label):
-    path = '%s/Dog/%s/%s.%s'
-    return os.path.expanduser(path % (image_folder, label, timestamp, 'jpeg'))
+def _make_filename(image_folder, name, label, extension='jpeg'):
+    subdirectory = '{label}/'.format(label=label) if label else ''
+    path = '%s/Dog/%s%s.%s'
+    filename = os.path.expanduser(path % (image_folder, subdirectory, name, extension))
+    return filename
 
 
 # TODO: Hardcode the arguments that never change anyway (like input height, width, layer)
@@ -189,12 +188,14 @@ def main():
         if args.preview:
             camera.start_preview()
 
-        data_generator = commit_data_to_long_term(args.time_interval)
+        data_filename = _make_filename(args.image_folder, 'data', None, 'json')
+        data_generator = commit_data_to_long_term(args.time_interval, data_filename)
         data = data_generator.send(None)
 
         # Capture one picture of entire scene each time it's started again.
         time.sleep(2)
-        scene_filename = time.strftime('%Y-%m-%d') + '.jpeg'
+        date = time.strftime('%Y-%m-%d')
+        scene_filename = _make_filename(args.image_folder, date, None)
         camera.capture(scene_filename)
 
         # TODO: Load the volleyball models too
