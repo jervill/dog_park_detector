@@ -30,9 +30,9 @@ from aiy.vision.models import utils
 
 # Bounding boxes of interesting locations:
 LOCATIONS = {
-    'court_one': (0,240,170,400),
-    'court_two': (170, 240, 408,400),
-    'dog_park': (559, 228, 820,388),
+    'court_one': (0, 220,170, 380),
+    'court_two': (170, 220, 408, 380),
+    'dog_park': (540, 195, 820, 355),
 }
 
 def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
