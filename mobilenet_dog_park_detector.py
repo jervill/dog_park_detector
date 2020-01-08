@@ -28,15 +28,6 @@ from picamera import PiCamera, Color
 from aiy.vision import inference
 from aiy.vision.models import utils
 
-DATA_OVER_TIME = {
-    'time': [],
-    'dog park': {
-        'high activity': [],
-        'low activity': [],
-        'no activity': [],
-    }
-}
-
 # Bounding boxes of interesting locations:
 LOCATIONS = {
     'court_one': (0,240,170,400),
@@ -49,7 +40,7 @@ def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
     for i in range(-border // 2, border // 2 + 1):
         draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), fill=fill, outline=outline)
         
-def commit_data_to_long_term(interval, filename, short_term_data={}):
+def commit_data_to_long_term(interval, filename):
     def get_average(list):
         accumulator = 0
         for value in list:
@@ -67,32 +58,35 @@ def commit_data_to_long_term(interval, filename, short_term_data={}):
             }
         }
 
-    short_term_data = reset_data()
+    # Save a file with an empty data structure.
+    data = reset_data()
+    with open(filename, 'w') as file:
+        file.write(json.dumps(data))
 
     while True:
-        yield short_term_data
+        processed_result = yield
 
-        elapsed_time = short_term_data['time'][-1] - short_term_data['time'][0]
+        # Add the result to the data object
+        data['time'].append(int(time.time()))
+        for label, prob in processed_result:
+            data['dog park'][label].append(prob)
+
+        elapsed_time = data['time'][-1] - data['time'][0]
 
         # If we've hit the time interval, record to long term.
         if elapsed_time > interval:
-            DATA_OVER_TIME['time'].append(short_term_data['time'][-1])
+            with open(filename, 'r+') as file:
+                data_over_time = json.load(file)
+                data_over_time['time'].append(data['time'][-1])
 
-            for k, v in short_term_data['dog park'].items():
-                average = get_average(v)
-                DATA_OVER_TIME['dog park'][k].append(average)
+                for k, v in data['dog park'].items():
+                    average = get_average(v)
+                    data_over_time['dog park'][k].append(average)
+                
+                data = reset_data()
 
-            short_term_data = reset_data()
-
-            with open(filename, 'w') as file:
-                file.write(json.dumps(DATA_OVER_TIME))
-
-
-def handle_data(data, result):
-    data['time'].append(int(time.time()))
-
-    for label, prob in result:
-        data['dog park'][label].append(prob)
+                file.seek(0)
+                file.write(json.dumps(data_over_time))
 
 
 def read_labels(label_path):
@@ -213,7 +207,7 @@ def main():
 
         data_filename = _make_filename(args.image_folder, 'data', None, 'json')
         data_generator = commit_data_to_long_term(args.time_interval, data_filename)
-        data = data_generator.send(None)
+        data_generator.send(None)
 
         # Capture one picture of entire scene each time it's started again.
         time.sleep(2)
@@ -244,8 +238,7 @@ def main():
                 # then run image_inference on them.
                 result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, args.output_layer)
-                handle_data(data, processed_result)
-                data = data_generator.send(data)
+                data_generator.send(processed_result)
                 message = get_message(processed_result)
 
                 # Print the message
