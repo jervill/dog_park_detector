@@ -39,13 +39,13 @@ def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
     assert border % 2 == 1
     for i in range(-border // 2, border // 2 + 1):
         draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), fill=fill, outline=outline)
-        
+
 def commit_data_to_long_term(interval, filename):
     def get_average(list):
         accumulator = 0
         for value in list:
             accumulator += value
-        
+
         return round(accumulator / len(list),2)
 
     def reset_data():
@@ -58,10 +58,19 @@ def commit_data_to_long_term(interval, filename):
             }
         }
 
+    # Map labels to an int
+    label_int_map = {
+        'high activity' : 2,
+        'low activity' : 1,
+        'no activity' : 0,
+    }
+
     # Save a file with an empty data structure.
     data = reset_data()
     with open(filename, 'w') as file:
-        file.write(json.dumps(data))
+        file.write(json.dumps({
+            'results': []
+        }))
 
     while True:
         processed_result = yield
@@ -77,12 +86,17 @@ def commit_data_to_long_term(interval, filename):
         if elapsed_time > interval:
             with open(filename, 'r+') as file:
                 data_over_time = json.load(file)
-                data_over_time['time'].append(data['time'][-1])
-
-                for k, v in data['dog park'].items():
-                    average = get_average(v)
-                    data_over_time['dog park'][k].append(average)
                 
+                # [time, value]
+                datapoint = [data['time'][-1],0]
+                max_value = 0
+                for key, value in data['dog park'].items():
+                    average = get_average(value)
+
+                    if average > max_value:
+                        datapoint[1] = label_int_map[key]
+                    
+                data_over_time['results'].append(datapoint)
                 data = reset_data()
 
                 file.seek(0)
