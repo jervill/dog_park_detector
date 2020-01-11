@@ -19,6 +19,7 @@ import argparse
 import time
 import json
 import random
+from contextlib import ExitStack
 
 from io import BytesIO
 from PIL import Image, ImageDraw
@@ -193,7 +194,11 @@ def main():
         for folder in expected_subfolders:
             assert folder in subfolders
 
-    with PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30) as camera:
+    with ExitStack() as stack:
+        camera = stack.enter_context(PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30))
+        # TODO: Load the volleyball models too
+        image_inference = stack.enter_context(inference.ImageInference(model))
+
         if args.preview:
             # Draw bounding boxes around locations
             # Load the arbitrarily sized image
@@ -237,46 +242,41 @@ def main():
                 x1, y1, x2, y2 = location
                 draw_rectangle(draw, x1, y1, x2, y2, 3, outline='white')
 
-            scene.save(scene_filename)
+            scene.save(scene_filename)        
 
+        # TODO: For each inference model, crop and process a different thing.
+        # Constantly get cropped images
+        for cropped_images in get_cropped_images(camera):
+            cropped_image = cropped_images[0]
 
-        # TODO: Load the volleyball models too
-        #     with A() as a, B() as b, C() as c:
-        with inference.ImageInference(model) as image_inference:
+            # then run image_inference on them.
+            result = image_inference.run(cropped_image)
+            processed_result = process(result, labels, args.output_layer)
+            data_generator.send(processed_result)
+            message = get_message(processed_result)
 
-            # TODO: For each inference model, crop and process a different thing.
-            # Constantly get cropped images
-            for cropped_images in get_cropped_images(camera):
-                cropped_image = cropped_images[0]
+            # Print the message
+            print(message)
 
-                # then run image_inference on them.
-                result = image_inference.run(cropped_image)
-                processed_result = process(result, labels, args.output_layer)
-                data_generator.send(processed_result)
-                message = get_message(processed_result)
+            timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
+            print(timestamp + '\n')
 
-                # Print the message
-                print(message)
+            if args.gather_data:
+                # Gather 1% data on 'no activity' since it's biased against that.
+                # Gather 0.1% of all images.
+                if(
+                    (processed_result[0][0] == 'no activity' and random.random() > 0.99) or
+                    (random.random() > 0.999)
+                ):
+                    filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
+                    cropped_image.save(filename)
 
-                timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
-                print(timestamp + '\n')
-
-                if args.gather_data:
-                    # Gather 1% data on 'no activity' since it's biased against that.
-                    # Gather 0.1% of all images.
-                    if(
-                        (processed_result[0][0] == 'no activity' and random.random() > 0.99) or
-                        (random.random() > 0.999)
-                    ):
-                        filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
-                        cropped_image.save(filename)
-
-                if args.preview:
-                    camera.annotate_foreground = Color('black')
-                    camera.annotate_background = Color('white')
-                    # PiCamera text annotation only supports ascii.
-                    camera.annotate_text = '\n %s' % message.encode(
-                        'ascii', 'backslashreplace').decode('ascii')
+            if args.preview:
+                camera.annotate_foreground = Color('black')
+                camera.annotate_background = Color('white')
+                # PiCamera text annotation only supports ascii.
+                camera.annotate_text = '\n %s' % message.encode(
+                    'ascii', 'backslashreplace').decode('ascii')
 
         if args.preview:
             camera.stop_preview()
