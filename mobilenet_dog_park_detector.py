@@ -79,12 +79,13 @@ def commit_data_to_long_term(interval, filename):
 
     # Save a file with an empty data structure.
     data = reset_data()
-    with open(filename, 'w') as file:
-        file.write(json.dumps({
-            'dog_park': {},
-            'court_one': {},
-            'court_two': {},
-        }))
+    if not os.path.isfile(filename):
+        with open(filename, 'w') as file:
+            file.write(json.dumps({
+                'dog_park': {},
+                'court_one': {},
+                'court_two': {},
+            }))
 
     while True:
         location_name, processed_result = yield
