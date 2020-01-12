@@ -28,6 +28,7 @@ from picamera import PiCamera, Color
 
 from aiy.vision import inference
 from aiy.vision.models import utils
+from aiy.vision.streaming.server import StreamingServer
 
 # Bounding boxes of interesting locations:
 LOCATIONS = {
@@ -191,6 +192,12 @@ def main():
     parser.add_argument('--input_mean', type=float, default=128.0, help='Input mean.')
     parser.add_argument('--input_std', type=float, default=128.0, help='Input std.')
     parser.add_argument('--input_depth', type=int, default=3, help='Input depth.')
+    parser.add_argument('--enable_streaming', default=False, action='store_true',
+                        help='Enable streaming server')
+    parser.add_argument('--streaming_bitrate', type=int, default=1000000,
+                        help='Streaming server video bitrate (kbps)')
+    parser.add_argument('--mdns_name', default='',
+                        help='Streaming server mDNS name')
     parser.add_argument('--preview', action='store_true', default=False,
         help='Enables camera preview in addition to printing result to terminal.')
     parser.add_argument('--time_interval', type=int, default=10,
@@ -252,6 +259,11 @@ def main():
             vb2['image_inference'] = stack.enter_context(inference.ImageInference(vb2['descriptor']))
 
         camera = stack.enter_context(PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30))
+
+        server = None
+        if args.enable_streaming:
+            server = stack.enter_context(StreamingServer(camera, bitrate=args.streaming_bitrate,
+                                                         mdns_name=args.mdns_name))
 
         if args.preview:
             # Draw bounding boxes around locations
