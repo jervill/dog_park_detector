@@ -52,7 +52,17 @@ def commit_data_to_long_term(interval, filename):
     def reset_data():
         return {
             'time': [],
-            'dog park': {
+            'dog_park': {
+                'high activity': [],
+                'low activity': [],
+                'no activity': [],
+            },
+            'court_one': {
+                'high activity': [],
+                'low activity': [],
+                'no activity': [],
+            },
+            'court_two': {
                 'high activity': [],
                 'low activity': [],
                 'no activity': [],
@@ -70,16 +80,18 @@ def commit_data_to_long_term(interval, filename):
     data = reset_data()
     with open(filename, 'w') as file:
         file.write(json.dumps({
-            'results': []
+            'dog_park': {},
+            'court_one': {},
+            'court_two': {},
         }))
 
     while True:
-        processed_result = yield
+        location_name, processed_result = yield
 
         # Add the result to the data object
         data['time'].append(int(time.time()))
         for label, prob in processed_result:
-            data['dog park'][label].append(prob)
+            data[location_name][label].append(prob)
 
         elapsed_time = data['time'][-1] - data['time'][0]
 
@@ -88,17 +100,27 @@ def commit_data_to_long_term(interval, filename):
             with open(filename, 'r+') as file:
                 data_over_time = json.load(file)
                 
-                # [time, value]
-                datapoint = [data['time'][-1],0]
-                max_value = 0
-                for key, value in data['dog park'].items():
+                # [location][time] = value
+                logged_time = data['time'][-1]
+
+                datapoint = 0
+
+                max_value = 0                    
+                for key, value in data[location_name].items():
                     average = get_average(value)
 
                     if average > max_value:
-                        datapoint[1] = label_int_map[key]
-                    
-                data_over_time['results'].append(datapoint)
-                data = reset_data()
+                        datapoint = label_int_map[key]
+
+                    # Reset values
+                    data[location_name][key] = []
+
+                print(time.strftime('%Y-%m-%d_%H.%M.%S'))
+                print(location_name + ':')
+                print('  Got activity score of ' + str(datapoint))
+                print('\n')
+
+                data_over_time[location_name][logged_time] = datapoint
 
                 file.seek(0)
                 file.write(json.dumps(data_over_time))
@@ -141,37 +163,36 @@ def get_cropped_images(camera):
         dog_park = image.crop(LOCATIONS['dog_park'])
         court_one = image.crop(LOCATIONS['court_one'])
         court_two = image.crop(LOCATIONS['court_two'])
-        yield (dog_park, court_one, court_two)
+
+        yield {
+            'dog_park': dog_park,
+            'court_one': court_one,
+            'court_two': court_two,
+        }
 
 
 def _make_filename(image_folder, name, label, extension='jpeg'):
-    subdirectory = '{label}/'.format(label=label) if label else ''
-    path = '%s/Dog/%s%s.%s'
+    subdirectory = '/{label}/'.format(label=label) if label else ''
+    path = '%s%s%s.%s'
     filename = os.path.expanduser(path % (image_folder, subdirectory, name, extension))
     return filename
 
 
-# TODO: Hardcode the arguments that never change anyway (like input height, width, layer)
-# TODO: Add argument for each model and layer. Put into List, then run each if possible.
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', required=True,
-        help='Path to converted model file that can run on VisionKit.')
+    parser.add_argument('--dog_park_model_path',
+        help='Path to the model file for the dog park.')
+    parser.add_argument('--vb1_model_path',
+        help='Path to the model file for volley ball court 1.')
+    parser.add_argument('--vb2_model_path',
+        help='Path to the model file for volley ball court 1.')
     parser.add_argument('--label_path', required=True,
         help='Path to label file that corresponds to the model.')
-    parser.add_argument('--input_height', type=int, required=True, help='Input height.')
-    parser.add_argument('--input_width', type=int, required=True, help='Input width.')
-    parser.add_argument('--input_layer', required=True, help='Name of input layer.')
-    parser.add_argument('--output_layer', required=True, help='Name of output layer.')
-    parser.add_argument('--num_frames', type=int, default=None,
-        help='Sets the number of frames to run for, otherwise runs forever.')
     parser.add_argument('--input_mean', type=float, default=128.0, help='Input mean.')
     parser.add_argument('--input_std', type=float, default=128.0, help='Input std.')
     parser.add_argument('--input_depth', type=int, default=3, help='Input depth.')
     parser.add_argument('--preview', action='store_true', default=False,
         help='Enables camera preview in addition to printing result to terminal.')
-    parser.add_argument('--show_fps', action='store_true', default=False,
-        help='Shows end to end FPS.')
     parser.add_argument('--time_interval', type=int, default=10,
         help='Time interval at which to store data in seconds.')
     parser.add_argument('--gather_data', action='store_true', default=False,
@@ -180,24 +201,57 @@ def main():
         help='Folder to save captured images')
     args = parser.parse_args()
 
-    model = inference.ModelDescriptor(
-        name='mobilenet_based_classifier',
-        input_shape=(1, args.input_height, args.input_width, args.input_depth),
-        input_normalizer=(args.input_mean, args.input_std),
-        compute_graph=utils.load_compute_graph(args.model_path))
     labels = read_labels(args.label_path)
+
+    # At least one model needs to be passed in.
+    assert args.dog_park_model_path or args.vb1_model_path or args.vb2_model_path
 
     # Check that the folder exists
     if args.gather_data:
-        expected_subfolders = ['Dog', 'VB1', 'VB2']
+        expected_subfolders = ['dog_park', 'court_one', 'court_two']
         subfolders = os.listdir(args.image_folder)
         for folder in expected_subfolders:
             assert folder in subfolders
 
     with ExitStack() as stack:
+
+        dog_park = {
+            'location_name': 'dog_park',
+            'path': args.dog_park_model_path,
+        } if args.dog_park_model_path else None
+        vb1 = {
+            'location_name': 'court_one',
+            'path': args.vb1_model_path,
+        } if args.vb1_model_path else None
+        vb2 = {
+            'location_name': 'court_two',
+            'path': args.vb2_model_path,
+        } if args.vb2_model_path else None
+
+
+        # Get the list of models, filter to only the ones that were passed in.
+        models = [dog_park, vb1, vb2]
+        models = list(filter(lambda model: model, models))
+
+        # Initialize models and add them to the context
+        for model in models:
+            print('Initializing {model_name}...'.format(model_name=model["location_name"]))
+            descriptor = inference.ModelDescriptor(
+                name='mobilenet_based_classifier',
+                input_shape=(1, 160, 160, args.input_depth),
+                input_normalizer=(args.input_mean, args.input_std),
+                compute_graph=utils.load_compute_graph(model['path']))
+
+            model['descriptor'] = descriptor
+        
+        if dog_park:
+            dog_park['image_inference'] = stack.enter_context(inference.ImageInference(dog_park['descriptor']))
+        if vb1:
+            vb1['image_inference'] = stack.enter_context(inference.ImageInference(vb1['descriptor']))
+        if vb2:
+            vb2['image_inference'] = stack.enter_context(inference.ImageInference(vb2['descriptor']))
+
         camera = stack.enter_context(PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30))
-        # TODO: Load the volleyball models too
-        image_inference = stack.enter_context(inference.ImageInference(model))
 
         if args.preview:
             # Draw bounding boxes around locations
@@ -244,39 +298,52 @@ def main():
 
             scene.save(scene_filename)        
 
-        # TODO: For each inference model, crop and process a different thing.
         # Constantly get cropped images
         for cropped_images in get_cropped_images(camera):
-            cropped_image = cropped_images[0]
 
-            # then run image_inference on them.
-            result = image_inference.run(cropped_image)
-            processed_result = process(result, labels, args.output_layer)
-            data_generator.send(processed_result)
-            message = get_message(processed_result)
+            # For each inference model, crop and process a different thing.
+            for model in models:
+                location_name = model['location_name']
+                image_inference = model['image_inference']
 
-            # Print the message
-            print(message)
+                cropped_image = cropped_images[location_name]
 
-            timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
-            print(timestamp + '\n')
+                # then run image_inference on them.
+                result = image_inference.run(cropped_image)
+                processed_result = process(result, labels, 'final_result')
+                data_generator.send((location_name, processed_result))
+                # message = get_message(processed_result)
+                label = processed_result[0][0]
 
-            if args.gather_data:
-                # Gather 1% data on 'no activity' since it's biased against that.
-                # Gather 0.1% of all images.
-                if(
-                    (processed_result[0][0] == 'no activity' and random.random() > 0.99) or
-                    (random.random() > 0.999)
-                ):
-                    filename = _make_filename(args.image_folder, timestamp, processed_result[0][0])
-                    cropped_image.save(filename)
+                # Print the message
+                # print('\n')
+                # print('{location_name}:'.format(location_name=location_name))
+                # print(message)
 
-            if args.preview:
-                camera.annotate_foreground = Color('black')
-                camera.annotate_background = Color('white')
-                # PiCamera text annotation only supports ascii.
-                camera.annotate_text = '\n %s' % message.encode(
-                    'ascii', 'backslashreplace').decode('ascii')
+                timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
+                # print(timestamp)
+                # print('\n')
+
+                if args.gather_data:
+                    # Gather 1% data on 'no activity' since it's biased against that.
+                    # Gather 0.1% of all images.
+                    if(
+                        # (label == 'no activity' and random.random() > 0.99) or
+                        # (random.random() > 0.999)
+                        (location != 'dog_park' and random.random() > 0.99) or
+                        (random.random() > 0.999)
+                    ):
+                        subdir = '{location_name}/{label}'.format(location_name=location_name, label=label)
+                        filename = _make_filename(args.image_folder, timestamp, subdir)
+                        cropped_image.save(filename)
+
+                # TODO: Figure out how to annotate at specific locations.
+                # if args.preview:
+                    # camera.annotate_foreground = Color('black')
+                    # camera.annotate_background = Color('white')
+                    # # PiCamera text annotation only supports ascii.
+                    # camera.annotate_text = '\n %s' % message.encode(
+                    #     'ascii', 'backslashreplace').decode('ascii')
 
         if args.preview:
             camera.stop_preview()
