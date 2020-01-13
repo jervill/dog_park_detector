@@ -29,6 +29,7 @@ from picamera import PiCamera, Color
 from aiy.vision import inference
 from aiy.vision.models import utils
 from aiy.vision.streaming.server import StreamingServer
+from aiy.vision.streaming import svg
 
 # Bounding boxes of interesting locations:
 LOCATIONS = {
@@ -41,6 +42,23 @@ def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
     assert border % 2 == 1
     for i in range(-border // 2, border // 2 + 1):
         draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), fill=fill, outline=outline)
+
+def svg_overlay(faces, frame_size, joy_score):
+    width, height = frame_size
+    doc = svg.Svg(width=width, height=height)
+
+    for face in faces:
+        x, y, w, h = face.bounding_box
+        doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
+                         fill_opacity=0.3 * face.face_score,
+                         style='fill:red;stroke:white;stroke-width:4px'))
+
+        doc.add(svg.Text('Joy: %.2f' % face.joy_score, x=x, y=y - 10,
+                         fill='red', font_size=30))
+
+    doc.add(svg.Text('Faces: %d Avg. joy: %.2f' % (len(faces), joy_score),
+            x=10, y=50, fill='red', font_size=40))
+    return str(doc)
 
 def commit_data_to_long_term(interval, filename):
     def get_average(list):
@@ -174,8 +192,8 @@ def get_cropped_images(camera):
 
 
 def _make_filename(image_folder, name, label, extension='jpeg'):
-    subdirectory = '/{label}/'.format(label=label) if label else ''
-    path = '%s%s%s.%s'
+    subdirectory = '{label}/'.format(label=label) if label else ''
+    path = '%s/%s%s.%s'
     filename = os.path.expanduser(path % (image_folder, subdirectory, name, extension))
     return filename
 
@@ -262,6 +280,7 @@ def main():
         camera = stack.enter_context(PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30))
 
         server = None
+        svg_scale_factor = 1.32
         if args.enable_streaming:
             server = stack.enter_context(StreamingServer(camera, bitrate=args.streaming_bitrate,
                                                          mdns_name=args.mdns_name))
@@ -314,6 +333,22 @@ def main():
         # Constantly get cropped images
         for cropped_images in get_cropped_images(camera):
 
+            svg_doc = None
+            if args.enable_streaming:
+                width = 820 * svg_scale_factor
+                height = 616 * svg_scale_factor
+                svg_doc = svg.Svg(width=width, height=height)
+
+                for location in LOCATIONS.values():
+                    x, y, x2, y2 = location
+                    w = (x2 - x) * svg_scale_factor
+                    h = (y2 - y) * svg_scale_factor
+                    x = x * svg_scale_factor
+                    y = y * svg_scale_factor
+                    svg_doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
+                                    fill_opacity=0.3,
+                                    style='fill:none;stroke:white;stroke-width:4px'))
+
             # For each inference model, crop and process a different thing.
             for model in models:
                 location_name = model['location_name']
@@ -325,7 +360,7 @@ def main():
                 result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, 'final_result')
                 data_generator.send((location_name, processed_result))
-                # message = get_message(processed_result)
+                message = get_message(processed_result)
                 label = processed_result[0][0]
 
                 # Print the message
@@ -343,20 +378,38 @@ def main():
                     if(
                         # (label == 'no activity' and random.random() > 0.99) or
                         # (random.random() > 0.999)
-                        (location != 'dog_park' and random.random() > 0.99) or
+                        (location_name != 'dog_park' and random.random() > 0.99) or
                         (random.random() > 0.999)
                     ):
                         subdir = '{location_name}/{label}'.format(location_name=location_name, label=label)
                         filename = _make_filename(args.image_folder, timestamp, subdir)
                         cropped_image.save(filename)
 
+                if svg_doc:
+                    ## Plot points out
+                    ## 160 x 80 grid
+                    ## 16px width
+                    ## 20, 40, 60 for 0, 1, 2
+                    lines = message.split('\n')
+                    y_correction = len(lines) * 20
+                    for line in lines:
+                        svg_doc.add(svg.Text(line,
+                        x=(LOCATIONS[location_name][0]) * svg_scale_factor,
+                        y=(LOCATIONS[location_name][1] - y_correction) * svg_scale_factor,
+                        fill='white', font_size=20))
+
+                        y_correction = y_correction - 20
+
                 # TODO: Figure out how to annotate at specific locations.
                 # if args.preview:
-                    # camera.annotate_foreground = Color('black')
-                    # camera.annotate_background = Color('white')
-                    # # PiCamera text annotation only supports ascii.
-                    # camera.annotate_text = '\n %s' % message.encode(
-                    #     'ascii', 'backslashreplace').decode('ascii')
+                #     camera.annotate_foreground = Color('black')
+                #     camera.annotate_background = Color('white')
+                #     # PiCamera text annotation only supports ascii.
+                #     camera.annotate_text = '\n %s' % message.encode(
+                #         'ascii', 'backslashreplace').decode('ascii')
+
+            if server:
+                server.send_overlay(str(svg_doc))
 
         if args.preview:
             camera.stop_preview()
