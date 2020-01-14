@@ -37,28 +37,28 @@ LOCATIONS = {
     'court_two': (170, 220, 408, 380),
     'dog_park': (540, 195, 820, 355),
 }
+SVG_SCALE_FACTOR = 1.32
 
 def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
     assert border % 2 == 1
     for i in range(-border // 2, border // 2 + 1):
         draw.rectangle((x0 + i, y0 + i, x1 - i, y1 - i), fill=fill, outline=outline)
 
-def svg_overlay(faces, frame_size, joy_score):
-    width, height = frame_size
-    doc = svg.Svg(width=width, height=height)
+def plot_svg_chart(svg_doc, location, data):
+    x, y, x2, y2 = LOCATIONS[location]
+    plotted_data = sorted(list(data[location].keys()))[-20:]
 
-    for face in faces:
-        x, y, w, h = face.bounding_box
-        doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
-                         fill_opacity=0.3 * face.face_score,
-                         style='fill:red;stroke:white;stroke-width:4px'))
+    for pos, time in enumerate(plotted_data):
+        start_x = (x + 8 * pos) * SVG_SCALE_FACTOR
+        width = 4 * SVG_SCALE_FACTOR
+        start_y = (y - 20 * data[location][time])
+        height = (y - start_y) * SVG_SCALE_FACTOR
+        start_y = start_y * SVG_SCALE_FACTOR
 
-        doc.add(svg.Text('Joy: %.2f' % face.joy_score, x=x, y=y - 10,
-                         fill='red', font_size=30))
+        color = 'red' if data[location][time] == 2 else 'green'
 
-    doc.add(svg.Text('Faces: %d Avg. joy: %.2f' % (len(faces), joy_score),
-            x=10, y=50, fill='red', font_size=40))
-    return str(doc)
+        svg_doc.add(svg.Rect(x=int(start_x), y=int(start_y), width=int(width), height=int(height), fill_opacity=0.3,
+                                    style='fill:'+color+';stroke:'+color+';stroke-width:4px'))
 
 def commit_data_to_long_term(interval, filename):
     def get_average(list):
@@ -106,7 +106,7 @@ def commit_data_to_long_term(interval, filename):
             }))
 
     while True:
-        location_name, processed_result = yield
+        location_name, processed_result, svg_doc = yield
 
         # Add the result to the data object
         data['time'].append(int(time.time()))
@@ -121,7 +121,7 @@ def commit_data_to_long_term(interval, filename):
                 data_over_time = json.load(file)
                 
                 # [location][time] = value
-                logged_time = data['time'][-1]
+                logged_time = str(data['time'][-1])
 
                 datapoint = 0
 
@@ -141,6 +141,9 @@ def commit_data_to_long_term(interval, filename):
                 print('\n')
 
                 data_over_time[location_name][logged_time] = datapoint
+
+                ## Plot most recent data on svg
+                plot_svg_chart(svg_doc, location_name, data_over_time)
 
                 file.seek(0)
                 file.write(json.dumps(data_over_time))
@@ -280,7 +283,6 @@ def main():
         camera = stack.enter_context(PiCamera(sensor_mode=4, resolution=(820, 616), framerate=30))
 
         server = None
-        svg_scale_factor = 1.32
         if args.enable_streaming:
             server = stack.enter_context(StreamingServer(camera, bitrate=args.streaming_bitrate,
                                                          mdns_name=args.mdns_name))
@@ -335,16 +337,16 @@ def main():
 
             svg_doc = None
             if args.enable_streaming:
-                width = 820 * svg_scale_factor
-                height = 616 * svg_scale_factor
+                width = 820 * SVG_SCALE_FACTOR
+                height = 616 * SVG_SCALE_FACTOR
                 svg_doc = svg.Svg(width=width, height=height)
 
                 for location in LOCATIONS.values():
                     x, y, x2, y2 = location
-                    w = (x2 - x) * svg_scale_factor
-                    h = (y2 - y) * svg_scale_factor
-                    x = x * svg_scale_factor
-                    y = y * svg_scale_factor
+                    w = (x2 - x) * SVG_SCALE_FACTOR
+                    h = (y2 - y) * SVG_SCALE_FACTOR
+                    x = x * SVG_SCALE_FACTOR
+                    y = y * SVG_SCALE_FACTOR
                     svg_doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
                                     fill_opacity=0.3,
                                     style='fill:none;stroke:white;stroke-width:4px'))
@@ -359,7 +361,7 @@ def main():
                 # then run image_inference on them.
                 result = image_inference.run(cropped_image)
                 processed_result = process(result, labels, 'final_result')
-                data_generator.send((location_name, processed_result))
+                data_generator.send((location_name, processed_result, svg_doc))
                 message = get_message(processed_result)
                 label = processed_result[0][0]
 
@@ -385,20 +387,20 @@ def main():
                         filename = _make_filename(args.image_folder, timestamp, subdir)
                         cropped_image.save(filename)
 
-                if svg_doc:
-                    ## Plot points out
-                    ## 160 x 80 grid
-                    ## 16px width
-                    ## 20, 40, 60 for 0, 1, 2
-                    lines = message.split('\n')
-                    y_correction = len(lines) * 20
-                    for line in lines:
-                        svg_doc.add(svg.Text(line,
-                        x=(LOCATIONS[location_name][0]) * svg_scale_factor,
-                        y=(LOCATIONS[location_name][1] - y_correction) * svg_scale_factor,
-                        fill='white', font_size=20))
+                # if svg_doc:
+                #     ## Plot points out
+                #     ## 160 x 80 grid
+                #     ## 16px width
+                #     ## 20, 40, 60 for 0, 1, 2
+                #     lines = message.split('\n')
+                #     y_correction = len(lines) * 20
+                #     for line in lines:
+                #         svg_doc.add(svg.Text(line,
+                #         x=(LOCATIONS[location_name][0]) * SVG_SCALE_FACTOR,
+                #         y=(LOCATIONS[location_name][1] - y_correction) * SVG_SCALE_FACTOR,
+                #         fill='white', font_size=20))
 
-                        y_correction = y_correction - 20
+                #         y_correction = y_correction - 20
 
                 # TODO: Figure out how to annotate at specific locations.
                 # if args.preview:
