@@ -21,6 +21,9 @@ import json
 import random
 from contextlib import ExitStack
 
+from wand.image import Image as WandImage
+from wand.color import Color
+
 from io import BytesIO
 from PIL import Image, ImageDraw
 
@@ -38,6 +41,8 @@ LOCATIONS = {
     'dog_park': (540, 195, 820, 355),
 }
 SVG_SCALE_FACTOR = 1.32
+
+TIMELAPSE_DELAY = 120
 
 def draw_rectangle(draw, x0, y0, x1, y1, border, fill=None, outline=None):
     assert border % 2 == 1
@@ -125,7 +130,8 @@ def commit_data_to_long_term(interval, filename):
 
                 datapoint = 0
 
-                max_value = 0                    
+                max_value = 0
+                print(data)
                 for key, value in data[location_name].items():
                     average = get_average(value)
 
@@ -173,25 +179,95 @@ def process(result, labels, tensor_name):
     return labeled_pairs
 
 
-def get_cropped_images(camera):
+def get_cropped_images(camera, timelapse):
+    next_timelapse = int(time.time()) + TIMELAPSE_DELAY
+
+    run_inference_until = {
+        'dog_park': False,
+        'court_one': False,
+        'court_two': False,
+    }
+
     while True:
         stream = BytesIO()
         # Take picture
         camera.capture(stream, format='jpeg', use_video_port=True)
         # "Rewind" the stream to the beginning so we can read its content
         stream.seek(0)
-        image = Image.open(stream)
+        image_1 = Image.open(stream)
 
         # Crop picture and return it
-        dog_park = image.crop(LOCATIONS['dog_park'])
-        court_one = image.crop(LOCATIONS['court_one'])
-        court_two = image.crop(LOCATIONS['court_two'])
+        dog_park_1 = image_1.crop(LOCATIONS['dog_park'])
+        court_one_1 = image_1.crop(LOCATIONS['court_one'])
+        court_two_1 = image_1.crop(LOCATIONS['court_two'])
 
-        yield {
-            'dog_park': dog_park,
-            'court_one': court_one,
-            'court_two': court_two,
+        # (Image Comparison) Wait one second
+        time.sleep(1)
+
+        # (Image Comparison) Take another picture, crop it
+        stream.seek(0)
+        camera.capture(stream, format='jpeg', use_video_port=True)
+        # "Rewind" the stream to the beginning so we can read its content
+        stream.seek(0)
+        image_2 = Image.open(stream)
+
+        # Crop picture and return it
+        dog_park_2 = image_2.crop(LOCATIONS['dog_park'])
+        court_one_2 = image_2.crop(LOCATIONS['court_one'])
+        court_two_2 = image_2.crop(LOCATIONS['court_two'])
+
+        result = {
+            'dog_park': 'dog park',
+            'court_one': 'court one',
+            'court_two': 'court two',
         }
+
+        # TODO: (Image Comparison) Compare crops
+        pics_to_compare = [
+            ('dog_park', dog_park_1, dog_park_2),
+            ('court_one', court_one_1, court_one_2),
+            ('court_two', court_two_1, court_two_2)
+        ]
+
+        for key, img1, img2 in pics_to_compare:
+            if run_inference_until[key] and run_inference_until[key] > time.time():
+                print('Running inference on ' + key + ' at ' + time.strftime('%H.%M.%S'))
+                result[key] = img2
+            else:
+                with BytesIO() as bytes1:
+                    with BytesIO() as bytes2:
+                        img1.save(bytes1, 'jpeg')
+                        img2.save(bytes2, 'jpeg')
+
+                        img1_bytes = bytes1.getvalue()
+                        img2_bytes = bytes2.getvalue()
+                        
+                        with WandImage(blob=img1_bytes) as base:
+                            with WandImage(blob=img2_bytes) as change:
+                                _, result_metric = base.compare(change, metric='undefined')
+                                diff_percent = round(result_metric * 100, 4)
+
+                                if diff_percent < 98.5:
+                                    print('Movement in ' + key +  ': ' + str(diff_percent))
+                                    result[key] = img2
+                                    # Run inference for the next 5 minutes
+                                    run_inference_until[key] = time.time() + 300
+                                    print('Run inference until: ' + str(run_inference_until[key]))
+                                else:
+                                    result[key] = False
+                                    run_inference_until[key] = False
+                    
+
+
+        # If they are not different, mark as False which later is interpreted as "no activity"
+        # If they are different, return the cropped image so an inference check can be done on it.
+        if timelapse:
+            if int(time.time()) > next_timelapse:
+                filename = '/home/pi/Pictures/Data/' + time.strftime('%Y-%m-%d_%H.%M.%S' + '.jpeg')
+                image_2.save(filename)
+                next_timelapse = int(time.time()) + TIMELAPSE_DELAY
+        
+        yield result
 
 
 def _make_filename(image_folder, name, label, extension='jpeg'):
@@ -226,6 +302,8 @@ def main():
         help='Time interval at which to store data in seconds.')
     parser.add_argument('--gather_data', action='store_true', default=False,
         help='Also save images according to the assigned category.')
+    parser.add_argument('--timelapse', action='store_true', default=False,
+        help='Also save some timelapses of the entire scene, every 120 seconds.')
     parser.add_argument('--image_folder', default='/home/pi/Pictures/Data',
         help='Folder to save captured images')
     args = parser.parse_args()
@@ -333,7 +411,7 @@ def main():
             scene.save(scene_filename)        
 
         # Constantly get cropped images
-        for cropped_images in get_cropped_images(camera):
+        for cropped_images in get_cropped_images(camera, args.timelapse):
 
             svg_doc = None
             if args.enable_streaming:
@@ -357,24 +435,31 @@ def main():
                 image_inference = model['image_inference']
 
                 cropped_image = cropped_images[location_name]
+                
+                # TODO: (Image Comparison) If False,return no activity.
+                if cropped_image:
+                    # then run image_inference on them.
+                    result = image_inference.run(cropped_image)
+                    processed_result = process(result, labels, 'final_result')
+                    data_generator.send((location_name, processed_result, svg_doc))
+                    message = get_message(processed_result)
 
-                # then run image_inference on them.
-                result = image_inference.run(cropped_image)
-                processed_result = process(result, labels, 'final_result')
-                data_generator.send((location_name, processed_result, svg_doc))
-                message = get_message(processed_result)
+                    # Print the message
+                    # print('\n')
+                    # print('{location_name}:'.format(location_name=location_name))
+                    # print(message)
+                else:
+                    # Fake processed_result
+                    processed_result = [('no activity', 1.00),('low activity', 0.00),('high activity', 0.00)]
+                    data_generator.send((location_name, processed_result, svg_doc))
+
+
                 label = processed_result[0][0]
-
-                # Print the message
-                # print('\n')
-                # print('{location_name}:'.format(location_name=location_name))
-                # print(message)
-
                 timestamp = time.strftime('%Y-%m-%d_%H.%M.%S')
                 # print(timestamp)
                 # print('\n')
 
-                if args.gather_data:
+                if args.gather_data and cropped_image:
                     # Gather 1% data on 'no activity' since it's biased against that.
                     # Gather 0.1% of all images.
                     if(
