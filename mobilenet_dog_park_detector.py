@@ -131,7 +131,7 @@ def commit_data_to_long_term(interval, filename):
                 datapoint = 0
 
                 max_value = 0
-                print(data)
+
                 for key, value in data[location_name].items():
                     average = get_average(value)
 
@@ -141,10 +141,8 @@ def commit_data_to_long_term(interval, filename):
                     # Reset values
                     data[location_name][key] = []
 
-                print(time.strftime('%Y-%m-%d_%H.%M.%S'))
-                print(location_name + ':')
-                print('  Got activity score of ' + str(datapoint))
-                print('\n')
+                print('\n' + time.strftime('%Y-%m-%d_%H.%M.%S'))
+                print(location_name + ' activity score:' + str(datapoint))
 
                 data_over_time[location_name][logged_time] = datapoint
 
@@ -153,6 +151,9 @@ def commit_data_to_long_term(interval, filename):
 
                 file.seek(0)
                 file.write(json.dumps(data_over_time))
+            if location_name == 'court_two':
+                data = reset_data()
+                print('\n')
 
 
 def read_labels(label_path):
