@@ -245,11 +245,11 @@ def get_cropped_images(camera, timelapse):
                         
                         with WandImage(blob=img1_bytes) as base:
                             with WandImage(blob=img2_bytes) as change:
-                                _, result_metric = base.compare(change, metric='undefined')
-                                diff_percent = round(result_metric * 100, 4)
+                                base.fuzz = base.quantum_range * 0.20
+                                _, result_metric = base.compare(change, metric='absolute')
 
-                                if diff_percent < 98.5:
-                                    print('Movement in ' + key +  ': ' + str(diff_percent))
+                                if result_metric > 100:
+                                    print('Movement in ' + key +  ': ' + str(result_metric))
                                     result[key] = img2
                                     # Run inference for the next 5 minutes
                                     run_inference_until[key] = time.time() + 300
