@@ -231,8 +231,9 @@ def get_cropped_images(camera, timelapse):
         ]
 
         for key, img1, img2 in pics_to_compare:
+            comparison_time = time.strftime('%H.%M.%S')
             if run_inference_until[key] and run_inference_until[key] > time.time():
-                print('Running inference on ' + key + ' at ' + time.strftime('%H.%M.%S'))
+                print('Running inference on ' + key + ' at ' + comparison_time)
                 result[key] = img2
             else:
                 with BytesIO() as bytes1:
@@ -246,14 +247,17 @@ def get_cropped_images(camera, timelapse):
                         with WandImage(blob=img1_bytes) as base:
                             with WandImage(blob=img2_bytes) as change:
                                 base.fuzz = base.quantum_range * 0.20
-                                _, result_metric = base.compare(change, metric='absolute')
+                                diff_img, result_metric = base.compare(change, metric='absolute')
 
-                                if result_metric > 100:
+                                if result_metric > 10:
                                     print('Movement in ' + key +  ': ' + str(result_metric))
                                     result[key] = img2
                                     # Run inference for the next 5 minutes
                                     run_inference_until[key] = time.time() + 300
                                     print('Run inference until: ' + str(run_inference_until[key]))
+                                    img1.save(key + '-' + comparison_time + '-before-' + '.jpeg')
+                                    img2.save(key + '-' + comparison_time + '-after-' + '.jpeg')
+                                    diff_img.save(filename=key + '-' + comparison_time + '-' + str(result_metric) + '-' + '.jpeg')
                                 else:
                                     result[key] = False
                                     run_inference_until[key] = False
