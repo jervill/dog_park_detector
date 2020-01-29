@@ -77,27 +77,23 @@ def commit_data_to_long_term(interval, filename):
         return {
             'time': [],
             'dog_park': {
-                'high activity': [],
-                'low activity': [],
-                'no activity': [],
+                'active': [],
+                'inactive': [],
             },
             'court_one': {
-                'high activity': [],
-                'low activity': [],
-                'no activity': [],
+                'active': [],
+                'inactive': [],
             },
             'court_two': {
-                'high activity': [],
-                'low activity': [],
-                'no activity': [],
+                'active': [],
+                'inactive': [],
             }
         }
 
     # Map labels to an int
     label_int_map = {
-        'high activity' : 2,
-        'low activity' : 1,
-        'no activity' : 0,
+        'active' : 1,
+        'inactive' : 0,
     }
 
     # Save a file with an empty data structure.
@@ -455,7 +451,7 @@ def main():
                     # print(message)
                 else:
                     # Fake processed_result
-                    processed_result = [('no activity', 1.00),('low activity', 0.00),('high activity', 0.00)]
+                    processed_result = [('inactive', 1.00),('active', 0.00)]
                     data_generator.send((location_name, processed_result, svg_doc))
 
 
@@ -470,8 +466,8 @@ def main():
                     if(
                         # (label == 'no activity' and random.random() > 0.99) or
                         # (random.random() > 0.999)
-                        (location_name != 'dog_park' and random.random() > 0.99) or
-                        (random.random() > 0.999)
+                        # (location_name != 'dog_park' and random.random() > 0.99) or
+                        (random.random() > 0.9)
                     ):
                         subdir = '{location_name}/{label}'.format(location_name=location_name, label=label)
                         filename = _make_filename(args.image_folder, timestamp, subdir)
